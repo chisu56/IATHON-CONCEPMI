@@ -1,7 +1,7 @@
 {
   "name": "yapilas",
   "version": "1.0.0",
-  "description": "YaPilas — Verificador inmediato contra estafas y confirmador de cobros para Perú.",
+  "description": "YaPilas! — Verificador inmediato contra estafas y confirmador de cobros para Perú.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

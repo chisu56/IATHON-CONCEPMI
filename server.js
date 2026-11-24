@@ -37,7 +37,7 @@ const PROFILE_FALLBACK_ACTIONS = {
 };
 
 function buildSystemPrompt(type) {
-  const baseRules = `Eres un asistente de prevención de estafas digitales en Perú llamado YaPilas.
+  const baseRules = `Eres un asistente de prevención de estafas digitales en Perú llamado YaPilas!.
 Tu audiencia incluye adultos mayores, bodegueros y jóvenes que necesitan decidir en menos de 10 segundos.
 
 REGLAS ESTRICTAS DE SEGURIDAD Y FORMATO:
@@ -423,6 +423,6 @@ app.get(['/', '/verificador', '/cobro', '/simulador'], (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`YaPilas disponible en http://localhost:${PORT}`);
+  console.log(`YaPilas! disponible en http://localhost:${PORT}`);
   console.log(`Simulador de pagos en http://localhost:${PORT}/simulador`);
 });
