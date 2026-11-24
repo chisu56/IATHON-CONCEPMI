@@ -1201,6 +1201,12 @@ a {
   color: var(--ink-secondary);
 }
 
+.sim-shortcut-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .phone-empty-state {
   text-align: center;
   padding: 24px 12px;

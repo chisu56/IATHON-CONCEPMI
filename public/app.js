@@ -548,6 +548,42 @@
     }
   });
 
+  function openSimulatorSmart(e) {
+    if (e) e.preventDefault();
+    const simUrl = `${window.location.origin}/simulador`;
+    const popup = window.open(simUrl, '_blank', 'noopener,noreferrer');
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+      // Fallback when browser or embedded preview blocks new tabs
+      navigate('/simulador');
+    }
+  }
+
+  const btnOpenSimulator = document.getElementById('btn-open-simulator');
+  if (btnOpenSimulator) {
+    btnOpenSimulator.addEventListener('click', openSimulatorSmart);
+  }
+
+  const homeOpenSim = document.getElementById('home-open-sim');
+  if (homeOpenSim) {
+    homeOpenSim.addEventListener('click', openSimulatorSmart);
+  }
+
+  const btnCopySimulator = document.getElementById('btn-copy-simulator');
+  if (btnCopySimulator) {
+    btnCopySimulator.addEventListener('click', async () => {
+      const simUrl = `${window.location.origin}/simulador`;
+      try {
+        await navigator.clipboard.writeText(simUrl);
+        btnCopySimulator.textContent = '✓ Enlace copiado';
+      } catch {
+        window.prompt('Copia este enlace del Simulador:', simUrl);
+      }
+      setTimeout(() => {
+        btnCopySimulator.textContent = 'Copiar enlace';
+      }, 2200);
+    });
+  }
+
   // ==========================================================================
   // View 4: Simulador de pagos (/simulador)
   // ==========================================================================
