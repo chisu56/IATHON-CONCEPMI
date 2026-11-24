@@ -164,13 +164,29 @@
   }
 
   // ==========================================================================
-  // SPA Router
+  // SPA Router (works on both Node server & Static Sites via hash URLs)
   // ==========================================================================
-  function normalizeRoute(pathname) {
-    if (pathname === '/verificador' || pathname === '/cobro' || pathname === '/simulador') {
-      return pathname;
-    }
+  function normalizeRoute(raw) {
+    const cleaned = String(raw || '')
+      .replace(/^#/, '')
+      .replace(/^\/+/, '/');
+    if (cleaned === '/verificador' || cleaned === 'verificador') return '/verificador';
+    if (cleaned === '/cobro' || cleaned === 'cobro') return '/cobro';
+    if (cleaned === '/simulador' || cleaned === 'simulador') return '/simulador';
     return '/';
+  }
+
+  function getRouteFromLocation() {
+    if (window.location.hash) {
+      const fromHash = normalizeRoute(window.location.hash);
+      if (fromHash !== '/') return fromHash;
+    }
+    return normalizeRoute(window.location.pathname);
+  }
+
+  function routeToUrl(route) {
+    if (route === '/') return '/';
+    return `/#${route.slice(1)}`;
   }
 
   function stopPolling() {
@@ -184,8 +200,10 @@
     const target = normalizeRoute(route);
     state.route = target;
 
-    if (!options.fromPopState && window.location.pathname !== target) {
-      window.history.pushState({}, '', target);
+    const desiredUrl = routeToUrl(target);
+    const currentUrl = `${window.location.pathname}${window.location.hash}`;
+    if (!options.fromPopState && currentUrl !== desiredUrl) {
+      window.history.pushState({}, '', desiredUrl);
     }
 
     Object.entries(views).forEach(([key, el]) => {
@@ -214,7 +232,11 @@
   }
 
   window.addEventListener('popstate', () => {
-    navigate(window.location.pathname, { fromPopState: true });
+    navigate(getRouteFromLocation(), { fromPopState: true });
+  });
+
+  window.addEventListener('hashchange', () => {
+    navigate(getRouteFromLocation(), { fromPopState: true });
   });
 
   // Bind navigation links & back buttons
@@ -523,26 +545,162 @@
     }
   }
 
+  // Cross-tab fallback store when deployed on a Static Site without /api/* rewrite
+  const LOCAL_CHARGE_KEY = 'yapilas_demo_charge_v1';
+
+  function createLocalCharge() {
+    const id = `COB-${Math.floor(1000 + Math.random() * 9000)}`;
+    const charge = {
+      id,
+      amount: 12.5,
+      amountFormatted: 'S/ 12,50',
+      merchant: 'Bodega Don Luis',
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      confirmedAt: null,
+      eventCount: 0,
+      lastNotice: null,
+    };
+    try {
+      window.localStorage.setItem(LOCAL_CHARGE_KEY, JSON.stringify(charge));
+    } catch {
+      // Ignore storage quota errors
+    }
+    return charge;
+  }
+
+  function getLocalCharge() {
+    try {
+      const raw = window.localStorage.getItem(LOCAL_CHARGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // Ignore parse errors
+    }
+    return createLocalCharge();
+  }
+
+  function saveLocalCharge(charge) {
+    try {
+      window.localStorage.setItem(LOCAL_CHARGE_KEY, JSON.stringify(charge));
+    } catch {
+      // Ignore storage errors
+    }
+    return charge;
+  }
+
+  function parseLocalAmount(val) {
+    const normalized = String(val ?? '').trim().replace(/^s\/\s*/i, '').replace(',', '.');
+    const num = Number(normalized);
+    return Number.isFinite(num) ? Math.round(num * 100) / 100 : NaN;
+  }
+
+  function simulateLocalPayment(paymentId, amount) {
+    const charge = getLocalCharge();
+    const incomingId = String(paymentId || '').trim().toUpperCase();
+    const incomingAmount = parseLocalAmount(amount);
+    const idMatches = incomingId === charge.id;
+    const amountMatches = Number.isFinite(incomingAmount) && incomingAmount === charge.amount;
+
+    if (charge.status === 'confirmed' && idMatches && amountMatches) {
+      return {
+        accepted: false,
+        duplicate: true,
+        status: 'confirmed',
+        message: 'Evento repetido ignorado. Este cobro ya fue confirmado.',
+        charge,
+      };
+    }
+
+    if (!idMatches || !amountMatches) {
+      const detail = !idMatches
+        ? 'El ID recibido no coincide con el cobro actual.'
+        : 'El monto recibido no coincide con S/ 12,50.';
+      if (charge.status === 'pending') {
+        charge.lastNotice = {
+          type: 'mismatch',
+          message: 'Revisa el abono en tu billetera',
+          detail,
+          at: new Date().toISOString(),
+        };
+        saveLocalCharge(charge);
+      }
+      return {
+        accepted: false,
+        duplicate: false,
+        reason: 'mismatch',
+        status: charge.status,
+        message: 'Revisa el abono en tu billetera',
+        detail,
+        charge,
+      };
+    }
+
+    charge.status = 'confirmed';
+    charge.confirmedAt = new Date().toISOString();
+    charge.eventCount = 1;
+    charge.lastNotice = {
+      type: 'confirmed',
+      message: 'Pago confirmado. Doce soles con cincuenta.',
+      detail: `Abono verificado para ${charge.id} por ${charge.amountFormatted}.`,
+      at: charge.confirmedAt,
+    };
+    saveLocalCharge(charge);
+    return {
+      accepted: true,
+      duplicate: false,
+      status: 'confirmed',
+      message: 'Pago confirmado. Doce soles con cincuenta.',
+      charge,
+    };
+  }
+
+  window.addEventListener('storage', (e) => {
+    if (e.key === LOCAL_CHARGE_KEY && e.newValue) {
+      try {
+        const updated = JSON.parse(e.newValue);
+        if (state.route === '/cobro') renderLuisCharge(updated);
+        if (state.route === '/simulador') renderSimulatorCharge(updated, false);
+      } catch {
+        // Ignore malformed storage data
+      }
+    }
+  });
+
   async function fetchCurrentChargeForLuis() {
     try {
       const res = await fetch('/api/payments/current', { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      renderLuisCharge(data.charge);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.charge) {
+          renderLuisCharge(data.charge);
+          return;
+        }
+      }
     } catch {
-      // Keep last known UI state silently during transient network hiccups
+      // Fall back to local cross-tab store
     }
+    renderLuisCharge(getLocalCharge());
   }
 
   btnResetCharge.addEventListener('click', async () => {
     btnResetCharge.disabled = true;
     try {
-      const res = await fetch('/api/payments/reset', { method: 'POST' });
-      if (!res.ok) return;
-      const data = await res.json();
+      let nextCharge = null;
+      try {
+        const res = await fetch('/api/payments/reset', { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.charge) nextCharge = data.charge;
+        }
+      } catch {
+        // Fall back to local reset
+      }
+      if (!nextCharge) {
+        nextCharge = createLocalCharge();
+      }
       state.spokenChargeId = null;
       paymentSpeechAlert.hidden = true;
-      renderLuisCharge(data.charge);
+      renderLuisCharge(nextCharge);
     } finally {
       btnResetCharge.disabled = false;
     }
@@ -550,10 +708,9 @@
 
   function openSimulatorSmart(e) {
     if (e) e.preventDefault();
-    const simUrl = `${window.location.origin}/simulador`;
+    const simUrl = `${window.location.origin}/#simulador`;
     const popup = window.open(simUrl, '_blank', 'noopener,noreferrer');
     if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-      // Fallback when browser or embedded preview blocks new tabs
       navigate('/simulador');
     }
   }
@@ -571,7 +728,7 @@
   const btnCopySimulator = document.getElementById('btn-copy-simulator');
   if (btnCopySimulator) {
     btnCopySimulator.addEventListener('click', async () => {
-      const simUrl = `${window.location.origin}/simulador`;
+      const simUrl = `${window.location.origin}/#simulador`;
       try {
         await navigator.clipboard.writeText(simUrl);
         btnCopySimulator.textContent = '✓ Enlace copiado';
@@ -585,7 +742,7 @@
   }
 
   // ==========================================================================
-  // View 4: Simulador de pagos (/simulador)
+  // View 4: Simulador de pagos (/simulador o /#simulador)
   // ==========================================================================
   function renderSimulatorCharge(charge, forceSyncInputs) {
     if (!charge) return;
@@ -606,12 +763,17 @@
   async function fetchCurrentChargeForSimulator(forceSyncInputs = false) {
     try {
       const res = await fetch('/api/payments/current', { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      renderSimulatorCharge(data.charge, forceSyncInputs);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.charge) {
+          renderSimulatorCharge(data.charge, forceSyncInputs);
+          return;
+        }
+      }
     } catch {
-      // Ignore transient polling errors
+      // Fall back to local cross-tab store
     }
+    renderSimulatorCharge(getLocalCharge(), forceSyncInputs);
   }
 
   function showSimFeedback(text, isOk) {
@@ -623,12 +785,24 @@
   async function sendSimulatedPayment(paymentId, amount) {
     btnSimConfirm.disabled = true;
     try {
-      const res = await fetch('/api/payments/simulate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paymentId, amount }),
-      });
-      const data = await res.json();
+      let data = null;
+      try {
+        const res = await fetch('/api/payments/simulate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paymentId, amount }),
+        });
+        if (res.ok) {
+          data = await res.json();
+        }
+      } catch {
+        // Fall back to local cross-tab store
+      }
+
+      if (!data) {
+        data = simulateLocalPayment(paymentId, amount);
+      }
+
       if (data.charge) {
         renderSimulatorCharge(data.charge, false);
       }
@@ -640,8 +814,6 @@
       } else {
         showSimFeedback(`⚠️ ${data.message} ${data.detail ? `(${data.detail})` : ''}`, false);
       }
-    } catch {
-      showSimFeedback('⚠️ No se pudo enviar el evento al servidor.', false);
     } finally {
       btnSimConfirm.disabled = false;
     }
@@ -683,5 +855,5 @@
   // Init
   // ==========================================================================
   setVerifierType('mensaje_sospechoso');
-  navigate(window.location.pathname, { fromPopState: true });
+  navigate(getRouteFromLocation(), { fromPopState: true });
 })();
