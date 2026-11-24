@@ -1,4 +1,4 @@
-# ¡NO CAIGAS!
+# YaPilas
 
 Web app de prevención inmediata contra estafas digitales y confirmación de cobros para adultos mayores, bodegueros y jóvenes en Perú. Entrega **un estado, una señal concreta y una sola acción segura en menos de 10 segundos**.
 
